@@ -1,114 +1,81 @@
 package com.upgrad.ubank.services;
 
-import com.upgrad.ubank.dao.AccountDAO;
-import com.upgrad.ubank.dao.DAOFactory;
 import com.upgrad.ubank.dtos.Account;
 import com.upgrad.ubank.dtos.Transaction;
 import com.upgrad.ubank.exceptions.AccountAlreadyRegisteredException;
+import com.upgrad.ubank.exceptions.InsufficientBalanceException;
 import com.upgrad.ubank.exceptions.AccountNotFoundException;
 import com.upgrad.ubank.exceptions.IncorrectPasswordException;
-import com.upgrad.ubank.exceptions.InsufficientBalanceException;
-import com.upgrad.ubank.interfaces.Observer;
-import com.upgrad.ubank.interfaces.Subject;
 
-import java.sql.SQLException;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.util.LinkedList;
-import java.util.List;
+public class AccountServiceImpl implements AccountService {
+    //Account array to store account objects for the application, later in the course
+    //this array will be replaced with database
+    private Account[] accounts;
 
-public class AccountServiceImpl implements AccountService, Subject {
+    //counter is used to track how many accounts are present in the account array
+    private int counter;
 
-    private static AccountServiceImpl instance;
+    private TransactionService transactionService;
 
-    private List<Observer> observers;
-
-    private DAOFactory daoFactory;
-    private AccountDAO accountDAO;
-
-    private AccountServiceImpl () {
-        observers = new LinkedList<>();
-
-        daoFactory = new DAOFactory();
-        accountDAO = daoFactory.getAccountDAO();
+    public AccountServiceImpl (TransactionService transactionService) {
+        accounts = new Account[100];
+        counter = 0;
+        this.transactionService = transactionService;
     }
 
-    public static AccountServiceImpl getInstance() {
-        if (instance == null) {
-            ServiceFactory serviceFactory = new ServiceFactory();
-            instance = new AccountServiceImpl();
-        }
-        return instance;
-    }
-
-    public boolean login (Account account) throws Exception {
+    public boolean login (Account account) throws AccountNotFoundException, IncorrectPasswordException {
         if (account == null) {
             throw new NullPointerException("Account object was null");
         }
-
-        Account temp = null;
-        try {
-            temp = accountDAO.findByAccountNo(account.getAccountNo());
-        } catch (SQLException e) {
-            throw new Exception("Some unexpected exception occurred.");
+        for (int i = 0; i < counter; i++) {
+            if (account.getAccountNo() == accounts[i].getAccountNo() && account.getPassword().equals(accounts[i].getPassword())) {
+                return true;
+            } else if (account.getAccountNo() == accounts[i].getAccountNo() && !account.getPassword().equals(accounts[i].getPassword())) {
+                throw new IncorrectPasswordException("Password is not correct.");
+            }
         }
-
-        if (temp == null) {
-            throw new AccountNotFoundException("Account no doesn't exist.");
-        } else if (!temp.getPassword().equals(account.getPassword())) {
-            throw new IncorrectPasswordException("Password is not correct.");
-        } else {
-            return true;
-        }
+        throw new AccountNotFoundException("Account no doesn't exist.");
     }
 
-    public boolean register (Account account) throws Exception {
+    public boolean register (Account account) throws AccountAlreadyRegisteredException {
         if (account == null) {
             throw new NullPointerException("Account object was null");
         }
-        Account temp = null;
-        try {
-            temp = accountDAO.findByAccountNo(account.getAccountNo());
-        } catch (SQLException e) {
-            throw new Exception ("Some unexpected exception occurred");
+        for (int i = 0; i < counter; i++) {
+            if (account.getAccountNo() == accounts[i].getAccountNo()) {
+                throw new AccountAlreadyRegisteredException("Account no already registered.");
+            }
         }
 
-        if (temp != null) {
-            throw new AccountAlreadyRegisteredException("Account no already registered.");
-        } else {
-            accountDAO.create(account);
-            return true;
-        }
+        account.setBalance(0);
+        accounts[counter++] = account;
+        return true;
     }
 
     @Override
-    public Account getAccount(int accountNo) throws Exception {
-        Account account = null;
-        try {
-            account = accountDAO.findByAccountNo(accountNo);
-        } catch (SQLException e) {
-            throw new Exception("Some unexpected exception occurred.");
+    public Account getAccount(int accountNo) throws AccountNotFoundException{
+        for (int i=0; i<counter; i++) {
+            if (accounts[i].getAccountNo() == accountNo) {
+                return accounts[i];
+            }
         }
-        if (account == null) {
-            throw new AccountNotFoundException("Account " + accountNo + " doesn't exists.");
-        } else {
-            return account;
-        }
+        throw new AccountNotFoundException("Account" + accountNo + "doesn't exist");
     }
 
     @Override
-    public Account deposit(int accountNo, int amount) throws Exception {
+    public Account deposit(int accountNo, int amount) throws AccountNotFoundException {
         Account account = getAccount(accountNo);
-
+        if (account == null) {
+            return null;
+        }
         account.setBalance(account.getBalance() + amount);
-        accountDAO.updateBalance(account);
 
         Transaction transaction = new Transaction();
         transaction.setAccountNo(accountNo);
-        transaction.setDate(LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+        transaction.setDate("DD/MM/YYYY");
         transaction.setAction("Deposit ");
         transaction.setAmount(amount);
-        notifyObservers(transaction);
+        System.out.println(transactionService.createTransaction(transaction));
 
         return account;
     }
@@ -118,41 +85,23 @@ public class AccountServiceImpl implements AccountService, Subject {
      * 13 July 2020. Please refer the business documents for more information.
      */
     @Override
-    public Account withdraw(int accountNo, int amount) throws Exception {
+    public Account withdraw(int accountNo, int amount) throws AccountNotFoundException,InsufficientBalanceException{
         Account account = getAccount(accountNo);
         if (account == null) {
             return null;
         }
         if ((account.getBalance() + 1000) < amount) {
-            throw new InsufficientBalanceException("Can't withdraw " + amount + " when balance is " + account.getBalance());
+            throw new InsufficientBalanceException("Can't withdraw"+ amount + "when the balance is " + account.getBalance());
         }
         account.setBalance(account.getBalance() - amount);
-        accountDAO.updateBalance(account);
 
         Transaction transaction = new Transaction();
         transaction.setAccountNo(accountNo);
-        transaction.setDate(LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+        transaction.setDate("DD/MM/YYYY");
         transaction.setAction("Withdraw");
         transaction.setAmount(amount);
-        notifyObservers(transaction);
+        System.out.println(transactionService.createTransaction(transaction));
 
         return account;
-    }
-
-    @Override
-    public void registerObserver(Observer observer) {
-        observers.add(observer);
-    }
-
-    @Override
-    public void removeObserver(Observer observer) {
-        observers.remove(observer);
-    }
-
-    @Override
-    public void notifyObservers(Object data) {
-        for (Observer observer: observers) {
-            observer.update(data);
-        }
     }
 }
